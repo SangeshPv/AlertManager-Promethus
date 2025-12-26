@@ -66,8 +66,7 @@ sleep 10
 echo "Installing Prometheus on the host..." 
 apt-get install -y wget tar 
 wget 
-https://github.com/prometheus/prometheus/releases/download/v2.54.1/prometheus-2.54.1.li
- nux-amd64.tar.gz 
+https://github.com/prometheus/prometheus/releases/download/v2.54.1/prometheus-2.54.1.linux-amd64.tar.gz 
 tar xvf prometheus-2.54.1.linux-amd64.tar.gz 
 mv prometheus-2.54.1.linux-amd64/prometheus /usr/local/bin/ 
 mv prometheus-2.54.1.linux-amd64/promtool /usr/local/bin/ 
@@ -191,8 +190,7 @@ incus exec SNMPExporter -- bash -c " \
     apt-get update && \ 
     apt-get install -y nano wget && \ 
     wget 
-https://github.com/prometheus/snmp_exporter/releases/download/v0.29.0/snmp_exporter-0.
- 29.0.linux-amd64.tar.gz && \ 
+https://github.com/prometheus/snmp_exporter/releases/download/v0.29.0/snmp_exporter-0.29.0.linux-amd64.tar.gz && \ 
     tar xzf snmp_exporter-0.29.0.linux-amd64.tar.gz && \ 
     cp snmp_exporter-0.29.0.linux-amd64/snmp_exporter /usr/local/bin/snmp_exporter && \ 
     chmod +x /usr/local/bin/snmp_exporter && \ 
@@ -306,4 +304,5 @@ Step 3: Configure Your Credentials (Critical) - to: 'YOUR_DESTINATION_EMAIL@gmai
         auth_username: 'YOUR_SENDING_EMAIL@gmail.com' 
         auth_password: 'YOUR-16-DIGIT-APP-PASSWORD' 
         auth_identity: 'YOUR_SENDING_EMAIL@gmail.com' 
+
  
