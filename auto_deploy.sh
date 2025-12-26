@@ -8,7 +8,7 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 echo "========================================================"
-echo "   AUTOMATED LAB DEPLOYMENT (Parts 1, 2, & 3 Combined)  "
+echo "   AUTOMATED LAB DEPLOYMENT (v3.0 - Final Fix)          "
 echo "========================================================"
 
 # ========================================================
@@ -38,8 +38,13 @@ EOF
 apt-get update
 apt-get install -y incus
 
-# 4. AUTOMATED INITIALIZATION (Replaces the manual "STOP" step)
-echo "--- Automating Incus Initialization (No manual input needed) ---"
+# 4. AUTOMATED INITIALIZATION
+echo "--- Automating Incus Initialization ---"
+if ! command -v incus &> /dev/null; then
+    echo "Incus install failed!"
+    exit 1
+fi
+
 cat <<EOF | incus admin init --preseed
 config: {}
 networks:
@@ -77,7 +82,6 @@ EOF
 echo "--- [Part 2] Deploying Containers ---"
 
 # 1. Create Containers
-echo "Creating Incus containers (downloading images)..."
 incus create images:ubuntu/noble/cloud switch
 incus create images:ubuntu/noble/cloud cnt2
 incus create images:ubuntu/noble/cloud SNMPExporter
@@ -103,7 +107,7 @@ cd /tmp
 wget -qnc https://github.com/prometheus/prometheus/releases/download/v2.54.1/prometheus-2.54.1.linux-amd64.tar.gz
 tar xf prometheus-2.54.1.linux-amd64.tar.gz
 
-# Move binaries and config (Force overwrite with -f/cp -r)
+# Move binaries and config
 mv -f prometheus-2.54.1.linux-amd64/prometheus /usr/local/bin/
 mv -f prometheus-2.54.1.linux-amd64/promtool /usr/local/bin/
 mkdir -p /etc/prometheus /var/lib/prometheus
@@ -139,7 +143,6 @@ incus exec switch -- bash -c "apt-get update && apt-get install -y snmp snmpd sn
 incus exec switch -- systemctl stop snmpd
 incus exec switch -- net-snmp-config --create-snmpv3-user -ro -a SHA -A myAuthPass123 -x AES -X myPrivPass456 authPrivUser
 
-# Push snmpd.conf
 cat <<EOF | incus file push - switch/etc/snmp/snmpd.conf
 agentAddress udp:161
 sysLocation "Incus Test Lab"
@@ -151,11 +154,11 @@ incus exec switch -- systemctl enable --now snmpd
 
 # --- 3. Configure 'AlertManager' Container ---
 echo "Configuring AlertManager..."
-incus exec alertmanager -- bash -c "apt-get update && apt-get install -y wget"
+incus exec alertmanager -- bash -c "apt-get update && apt-get install -y wget curl"
 incus exec alertmanager -- bash -c "wget -qnc https://github.com/prometheus/alertmanager/releases/download/v0.28.1/alertmanager-0.28.1.linux-amd64.tar.gz && tar -xf alertmanager-0.28.1.linux-amd64.tar.gz"
 incus exec alertmanager -- mkdir -p /etc/alertmanager
 
-# !!! CREDENTIALS SECTION !!!
+# !!! CREDENTIALS HERE !!!
 echo "Pushing AlertManager Config..."
 cat <<EOF | incus file push - alertmanager/etc/alertmanager/alertmanager.yml
 route:
@@ -177,7 +180,6 @@ receivers:
         require_tls: false
 EOF
 
-# AlertManager Service
 cat <<EOF | incus file push - alertmanager/etc/systemd/system/alertmanager.service
 [Unit]
 Description=Prometheus Alertmanager
@@ -199,36 +201,42 @@ incus exec alertmanager -- systemctl daemon-reload
 incus exec alertmanager -- systemctl enable --now alertmanager
 
 # --- 4. Configure 'SNMPExporter' Container ---
-echo "Configuring SNMP Exporter..."
+echo "Configuring SNMP Exporter (v0.29.0)..."
 incus exec SNMPExporter -- bash -c "apt-get update && apt-get install -y wget"
 incus exec SNMPExporter -- bash -c "wget -qnc https://github.com/prometheus/snmp_exporter/releases/download/v0.29.0/snmp_exporter-0.29.0.linux-amd64.tar.gz && tar xf snmp_exporter-0.29.0.linux-amd64.tar.gz"
 incus exec SNMPExporter -- bash -c "cp snmp_exporter-0.29.0.linux-amd64/snmp_exporter /usr/local/bin/ && mkdir -p /etc/snmp_exporter"
 
-# Push snmp.yml (OIDs)
+# Push snmp.yml (Updated with CPU support and correct v0.29 syntax)
 cat <<EOF | incus file push - SNMPExporter/etc/snmp_exporter/snmp.yml
-snmpv3_switch:
-  walk: [1.3.6.1.2.1.1, 1.3.6.1.2.1.2, 1.3.6.1.2.1.31.1.1]
-  metrics:
-    - name: sysDescr
-      oid: 1.3.6.1.2.1.1.1
-      type: DisplayString
-      help: "System description"
-EOF
-
-# Push auth.yml (Credentials)
-cat <<EOF | incus file push - SNMPExporter/etc/snmp_exporter/auth.yml
-configs:
-  snmpv3_switch:
+auths:
+  my_switch_auth:
     version: 3
-    username: "authPrivUser"
-    security_level: "authPriv"
-    auth_protocol: "SHA"
-    auth_password: "myAuthPass123"
-    priv_protocol: "AES"
-    priv_password: "myPrivPass456"
+    security_level: authPriv
+    username: authPrivUser
+    password: myAuthPass123
+    auth_protocol: SHA
+    priv_protocol: AES
+    priv_password: myPrivPass456
+
+modules:
+  snmpv3_switch:
+    walk: 
+      - 1.3.6.1.2.1.1
+      - 1.3.6.1.2.1.2
+      - 1.3.6.1.2.1.31.1.1
+      - 1.3.6.1.4.1.2021
+    metrics:
+      - name: sysDescr
+        oid: 1.3.6.1.2.1.1.1
+        type: DisplayString
+        help: "System description"
+      - name: cpuLoad1Min
+        oid: 1.3.6.1.4.1.2021.10.1.3.1
+        type: DisplayString
+        help: "CPU Load Average (1 min)"
 EOF
 
-# SNMP Exporter Service
+# Service File
 cat <<EOF | incus file push - SNMPExporter/etc/systemd/system/snmp_exporter.service
 [Unit]
 Description=Prometheus SNMP Exporter
@@ -239,7 +247,6 @@ User=root
 Restart=on-failure
 ExecStart=/usr/local/bin/snmp_exporter \\
   --config.file=/etc/snmp_exporter/snmp.yml \\
-  --config.auth-file=/etc/snmp_exporter/auth.yml \\
   --web.listen-address=0.0.0.0:9116
 [Install]
 WantedBy=multi-user.target
@@ -248,7 +255,20 @@ EOF
 incus exec SNMPExporter -- systemctl daemon-reload
 incus exec SNMPExporter -- systemctl enable --now snmp_exporter
 
-# --- 5. Finalize Host Prometheus Config ---
+# --- 5. Finalize Host Prometheus Config & DNS ---
+echo "Fixing Host DNS for Containers..."
+# Get container IPs (Fixed: Removed syntax error backslashes)
+ALERT_IP=$(incus list alertmanager -c 4 -f csv | cut -d' ' -f1)
+SNMP_IP=$(incus list SNMPExporter -c 4 -f csv | cut -d' ' -f1)
+
+# Remove old entries if they exist
+sed -i '/alertmanager.incus/d' /etc/hosts
+sed -i '/SNMPExporter.incus/d' /etc/hosts
+
+# Add new entries
+echo "$ALERT_IP alertmanager.incus" >> /etc/hosts
+echo "$SNMP_IP SNMPExporter.incus" >> /etc/hosts
+
 echo "Linking Prometheus to containers..."
 cat <<EOF > /etc/prometheus/prometheus.yml
 global:
@@ -272,6 +292,7 @@ scrape_configs:
     metrics_path: /snmp
     params:
       module: [snmpv3_switch]
+      auth: [my_switch_auth]
       target: ["switch.incus"]
     static_configs:
       - targets: ["SNMPExporter.incus:9116"]
@@ -284,4 +305,4 @@ systemctl restart prometheus
 echo "========================================================"
 echo "          DEPLOYMENT COMPLETE SUCCESSFULLY"
 echo "========================================================"
-echo "Prometheus is available at: http://$(hostname -I | awk '{print $1}'):9090"
+echo "Prometheus: http://$(hostname -I | awk '{print $1}'):9090"
