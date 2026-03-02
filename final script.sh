@@ -265,7 +265,7 @@ EOF
 echo "Configuring SNMPv3..."
 incus exec switch -- bash <<'EOF'
 apt-get update
-apt-get install -y nano snmp snmpd snmp-mibs-downloader libsnmp-dev
+apt-get install -y nano snmp ufw snmpd snmp-mibs-downloader libsnmp-dev
 systemctl stop snmpd
 # Create SNMPv3 User
 net-snmp-create-v3-user -ro -a SHA -A "Hero12345" -x AES -X "Hero12345" Hero
@@ -276,7 +276,6 @@ sysLocation "Incus Test Lab"
 sysContact Test@example.com
 # SNMPv3 user access
 rouser Hero
-agentAddress udp:161
 sysLocation "Incus Test Lab"
 EOTEE
 systemctl status snmpd
