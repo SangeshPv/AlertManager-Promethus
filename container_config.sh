@@ -1,26 +1,127 @@
 #!/bin/bash
 set -e
 
-echo "--- [Part 3/3] Configuring Software and Services ---"
+# --- CHECKS ---
+if [ "$EUID" -ne 0 ]; then
+  echo "Please run as root (sudo ./containers_config.sh)"
+  exit
+fi
 
-# --- 1. Install Prometheus (On Host) ---
-echo "Installing Prometheus on the host..."
-wget -qnc https://github.com/prometheus/prometheus/releases/download/v2.54.1/prometheus-2.54.1.linux-amd64.tar.gz
-tar xf prometheus-2.54.1.linux-amd64.tar.gz
+echo "========================================================"
+echo "   PART 3 - CONFIGURING CONTAINERS"
+echo "========================================================"
 
-# Move binaries and config
+# ========================================================
+# CHECK INCUS IS AVAILABLE
+# ========================================================
+if ! command -v incus &> /dev/null; then
+    echo "Error: Incus is not installed. Run incus.sh first."
+    exit 1
+fi
+
+# ========================================================
+# FETCH CONTAINER IPs
+# ========================================================
+echo "--- Fetching container IP addresses ---"
+SWITCH_IP=$(incus list switch --format=json | jq -r '.[0].state.network.eth0.addresses[] | select(.family=="inet").address')
+SNMP_EXPORTER_IP=$(incus list SNMPExporter --format=json | jq -r '.[0].state.network.eth0.addresses[] | select(.family=="inet").address')
+ALERTMANAGER_IP=$(incus list alertmanager --format=json | jq -r '.[0].state.network.eth0.addresses[] | select(.family=="inet").address')
+CNT2_IP=$(incus list cnt2 --format=json | jq -r '.[0].state.network.eth0.addresses[] | select(.family=="inet").address')
+
+if [ -z "$SWITCH_IP" ] || [ -z "$SNMP_EXPORTER_IP" ] || [ -z "$ALERTMANAGER_IP" ] || [ -z "$CNT2_IP" ]; then
+    echo "Error: Failed to get IP for one or more containers."
+    echo "Make sure all containers are running (incus list) then try again."
+    exit 1
+fi
+
+echo "  - Switch Target IP: $SWITCH_IP"
+echo "  - SNMP Exporter IP: $SNMP_EXPORTER_IP"
+echo "  - Alertmanager IP:  $ALERTMANAGER_IP"
+echo "  - Prometheus IP:    $CNT2_IP"
+
+# ========================================================
+# CONFIGURE cnt2 (Prometheus)
+# ========================================================
+echo "--- Configuring Prometheus on cnt2 ---"
+incus exec cnt2 -- bash -s "$SWITCH_IP" "$SNMP_EXPORTER_IP" "$ALERTMANAGER_IP" <<'EOF'
+TARGET_SWITCH_IP=$1
+SNMP_EXPORTER_IP=$2
+ALERTMANAGER_IP=$3
+
+apt-get update
+apt-get install -y wget tar nano
+
+wget https://github.com/prometheus/prometheus/releases/download/v2.54.1/prometheus-2.54.1.linux-amd64.tar.gz
+tar xvf prometheus-2.54.1.linux-amd64.tar.gz
+
+mkdir -p /etc/prometheus /var/lib/prometheus
 mv prometheus-2.54.1.linux-amd64/prometheus /usr/local/bin/
 mv prometheus-2.54.1.linux-amd64/promtool /usr/local/bin/
-mkdir -p /etc/prometheus /var/lib/prometheus
 mv prometheus-2.54.1.linux-amd64/consoles /etc/prometheus/
 mv prometheus-2.54.1.linux-amd64/console_libraries /etc/prometheus/
+rm -rf prometheus-2.54.1.linux-amd64.tar.gz prometheus-2.54.1.linux-amd64
 
-# Create user
-useradd --no-create-home --shell /bin/false prometheus || echo "User prometheus exists"
+cat <<EOTEE > /etc/prometheus/prometheus.yml
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  scrape_timeout: 10s
+
+scrape_configs:
+  - job_name: 'snmp'
+    scrape_interval: 30s
+    scrape_timeout: 20s
+    metrics_path: /snmp
+    params:
+      module: [snmpv3_switch]
+      auth: [public_v3]
+    static_configs:
+      - targets:
+          - '${TARGET_SWITCH_IP}'
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: '${SNMP_EXPORTER_IP}:9116'
+
+    metric_relabel_configs:
+      - source_labels: [ifIndex]
+        regex: '(.*)'
+        target_label: interface
+      - source_labels: [__name__]
+        regex: '^if(HC)?(In|Out)Octets$'
+        action: keep
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - '${ALERTMANAGER_IP}:9093'
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+EOTEE
+
+cat <<EOTEE > /etc/prometheus/alerts.yml
+groups:
+  - name: SNMP Switch Alerts
+    rules:
+      - alert: SwitchDown
+        expr: up{job="snmp"} == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "SNMP Switch is down"
+          description: "The SNMP switch ({{ \$labels.instance }}) is not responding."
+EOTEE
+
+useradd --no-create-home --shell /bin/false prometheus
 chown -R prometheus:prometheus /etc/prometheus /var/lib/prometheus
 
-# Service file
-tee /etc/systemd/system/prometheus.service > /dev/null <<EOF
+cat <<EOTEE > /etc/systemd/system/prometheus.service
 [Unit]
 Description=Prometheus Monitoring
 After=network.target
@@ -28,41 +129,138 @@ After=network.target
 [Service]
 User=prometheus
 Group=prometheus
-ExecStart=/usr/local/bin/prometheus \\
-        --config.file /etc/prometheus/prometheus.yml \\
-        --storage.tsdb.path /var/lib/prometheus/ \\
-        --web.console.templates=/etc/prometheus/consoles \\
-        --web.console.libraries=/etc/prometheus/console_libraries
+ExecStart=/usr/local/bin/prometheus \
+            --config.file /etc/prometheus/prometheus.yml \
+            --storage.tsdb.path /var/lib/prometheus/ \
+            --web.console.templates=/etc/prometheus/consoles \
+            --web.console.libraries=/etc/prometheus/console_libraries
 
 [Install]
 WantedBy=multi-user.target
+EOTEE
+
+systemctl daemon-reload
+systemctl enable prometheus
+systemctl start prometheus
+systemctl status prometheus
 EOF
 
-# --- 2. Configure 'switch' Container (SNMPv3 Agent) ---
-echo "Configuring SNMPv3 inside 'switch' container..."
-incus exec switch -- bash -c "apt-get update && apt-get install -y snmp snmpd snmp-mibs-downloader libsnmp-dev"
-incus exec switch -- systemctl stop snmpd
-incus exec switch -- net-snmp-config --create-snmpv3-user -ro -a SHA -A myAuthPass123 -x AES -X myPrivPass456 authPrivUser
+# ========================================================
+# CONFIGURE SNMPExporter
+# ========================================================
+echo "--- Configuring SNMP Exporter ---"
+incus exec SNMPExporter -- bash <<'EOF'
+apt-get update
+apt-get install -y curl make nano unzip openssh-server build-essential libsnmp-dev golang-go git snmp snmp-mibs-downloader
+systemctl enable --now ssh
 
-# Push snmpd.conf
-incus file push - switch/etc/snmp/snmpd.conf <<EOF
+wget https://github.com/prometheus/snmp_exporter/releases/download/v0.29.0/snmp_exporter-0.29.0.linux-amd64.tar.gz
+tar xvf snmp_exporter-0.29.0.linux-amd64.tar.gz
+cp snmp_exporter-0.29.0.linux-amd64/snmp_exporter /usr/local/bin/snmp_exporter
+chmod +x /usr/local/bin/snmp_exporter
+mkdir -p /etc/snmp_exporter
+
+cd ~
+git clone https://github.com/prometheus/snmp_exporter.git
+cd ~/snmp_exporter/generator/
+rm -f generator.yml
+
+cat <<EOTEE > generator.yml
+---
+auths:
+  public_v3:
+    version: 3
+    username: Hero
+    security_level: authPriv
+    auth_protocol: SHA
+    password: Hero12345
+    priv_protocol: AES
+    priv_password: Hero12345
+
+modules:
+  snmpv3_switch:
+    walk:
+      - 1.3.6.1.2.1.1
+      - 1.3.6.1.2.1.2
+      - 1.3.6.1.2.1.31.1.1
+    lookups:
+      - source_indexes: [ifIndex]
+        lookup: ifDescr
+EOTEE
+
+mkdir -p mibs
+curl -L -o mibs/SNMPv2-SMI.txt https://raw.githubusercontent.com/net-snmp/net-snmp/master/mibs/SNMPv2-SMI.txt
+curl -L -o mibs/SNMPv2-TC.txt https://raw.githubusercontent.com/net-snmp/net-snmp/master/mibs/SNMPv2-TC.txt
+curl -L -o mibs/SNMPv2-MIB.txt https://raw.githubusercontent.com/net-snmp/net-snmp/master/mibs/SNMPv2-MIB.txt
+curl -L -o mibs/IF-MIB.txt https://raw.githubusercontent.com/net-snmp/net-snmp/master/mibs/IF-MIB.txt
+curl -L -o mibs/IANAifType-MIB.txt https://raw.githubusercontent.com/net-snmp/net-snmp/master/mibs/IANAifType-MIB.txt
+
+go run . generate --no-fail-on-parse-errors
+cp ~/snmp_exporter/generator/snmp.yml /etc/snmp_exporter/snmp.yml
+
+cat <<EOTEE > /etc/systemd/system/snmp_exporter.service
+[Unit]
+Description=SNMP Exporter
+After=network.target
+
+[Service]
+User=root
+Group=root
+Type=simple
+ExecStart=/usr/local/bin/snmp_exporter \
+  --config.file=/etc/snmp_exporter/snmp.yml
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOTEE
+
+systemctl daemon-reload
+systemctl enable snmp_exporter
+systemctl start snmp_exporter
+systemctl status snmp_exporter
+EOF
+
+# ========================================================
+# CONFIGURE switch (SNMPv3)
+# ========================================================
+echo "--- Configuring SNMPv3 on switch ---"
+incus exec switch -- bash <<'EOF'
+apt-get update
+apt-get install -y nano snmp ufw snmpd snmp-mibs-downloader libsnmp-dev
+systemctl stop snmpd
+
+net-snmp-create-v3-user -ro -a SHA -A "Hero12345" -x AES -X "Hero12345" Hero
+
+cat <<EOTEE > /etc/snmp/snmpd.conf
+rocommunity public
 agentAddress udp:161
 sysLocation "Incus Test Lab"
 sysContact Test@example.com
-rouser authPrivUser authPriv
+rouser Hero
+EOTEE
+
+systemctl start snmpd
+systemctl enable snmpd
+systemctl status snmpd
+ufw allow 161/udp
 EOF
 
-incus exec switch -- systemctl enable --now snmpd
+# ========================================================
+# CONFIGURE alertmanager
+# ========================================================
+echo "--- Configuring Alertmanager ---"
+incus exec alertmanager -- bash <<'EOF'
+apt-get update
+apt-get install -y wget tar nano openssh-server
+systemctl enable --now ssh
 
-# --- 3. Configure 'AlertManager' Container ---
-echo "Configuring AlertManager..."
-incus exec alertmanager -- bash -c "apt-get update && apt-get install -y wget"
-incus exec alertmanager -- bash -c "wget -qnc https://github.com/prometheus/alertmanager/releases/download/v0.28.1/alertmanager-0.28.1.linux-amd64.tar.gz && tar -xf alertmanager-0.28.1.linux-amd64.tar.gz"
-incus exec alertmanager -- mkdir -p /etc/alertmanager
+wget https://github.com/prometheus/alertmanager/releases/download/v0.28.1/alertmanager-0.28.1.linux-amd64.tar.gz
+tar xvf alertmanager-0.28.1.linux-amd64.tar.gz
+mkdir -p /etc/alertmanager
 
-# !!! EDIT CREDENTIALS HERE !!!
-echo "Pushing AlertManager Config..."
-incus file push - alertmanager/etc/alertmanager/alertmanager.yml <<EOF
+cat <<EOTEE > /etc/alertmanager/alertmanager.yml
 route:
   group_by: ['alertname']
   group_wait: 30s
@@ -73,17 +271,28 @@ route:
 receivers:
   - name: 'email-notifications'
     email_configs:
-      - to: 'YOUR_DESTINATION_EMAIL@gmail.com'
-        from: 'YOUR_SENDING_EMAIL@gmail.com'
-        smarthost: 'smtp.gmail.com:465'
-        auth_username: 'YOUR_SENDING_EMAIL@gmail.com'
-        auth_password: 'YOUR-16-DIGIT-APP-PASSWORD'
-        auth_identity: 'YOUR_SENDING_EMAIL@gmail.com'
-        require_tls: false
-EOF
+      - to: 'enter email@gmail.com'
+        from: 'enter email.mpct@gmail.com'
+        smarthost: 'smtp.gmail.com:587'
+        auth_username: 'enter email.mpct@gmail.com'
+        auth_password: 'generate 1 of your own'
+        auth_identity: 'enter email.mpct@gmail.com'
+        require_tls: true
 
-# AlertManager Service
-incus file push - alertmanager/etc/systemd/system/alertmanager.service <<EOF
+  - name: 'web.hook'
+    webhook_configs:
+      - url: 'http://127.0.0.1:5001/'
+        send_resolved: true
+
+inhibit_rules:
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'dev', 'instance']
+EOTEE
+
+cat <<EOTEE > /etc/systemd/system/alertmanager.service
 [Unit]
 Description=Prometheus Alertmanager
 Wants=network-online.target
@@ -91,100 +300,28 @@ After=network-online.target
 
 [Service]
 User=root
-ExecStart=/root/alertmanager-0.28.1.linux-amd64/alertmanager \\
-  --config.file=/etc/alertmanager/alertmanager.yml \\
+Group=root
+Type=simple
+ExecStart=/root/alertmanager-0.28.1.linux-amd64/alertmanager \
+  --config.file=/etc/alertmanager/alertmanager.yml \
   --cluster.listen-address=""
 Restart=on-failure
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
-EOF
+EOTEE
 
-incus exec alertmanager -- systemctl daemon-reload
-incus exec alertmanager -- systemctl enable --now alertmanager
-
-# --- 4. Configure 'SNMPExporter' Container ---
-echo "Configuring SNMP Exporter..."
-incus exec SNMPExporter -- bash -c "apt-get update && apt-get install -y wget"
-incus exec SNMPExporter -- bash -c "wget -qnc https://github.com/prometheus/snmp_exporter/releases/download/v0.29.0/snmp_exporter-0.29.0.linux-amd64.tar.gz && tar xf snmp_exporter-0.29.0.linux-amd64.tar.gz"
-incus exec SNMPExporter -- bash -c "cp snmp_exporter-0.29.0.linux-amd64/snmp_exporter /usr/local/bin/ && mkdir -p /etc/snmp_exporter"
-
-# Push snmp.yml (OIDs)
-incus file push - SNMPExporter/etc/snmp_exporter/snmp.yml <<EOF
-snmpv3_switch:
-  walk: [1.3.6.1.2.1.1, 1.3.6.1.2.1.2, 1.3.6.1.2.1.31.1.1]
-  metrics:
-    - name: sysDescr
-      oid: 1.3.6.1.2.1.1.1
-      type: DisplayString
-      help: "System description"
-EOF
-
-# Push auth.yml (Credentials)
-incus file push - SNMPExporter/etc/snmp_exporter/auth.yml <<EOF
-configs:
-  snmpv3_switch:
-    version: 3
-    username: "authPrivUser"
-    security_level: "authPriv"
-    auth_protocol: "SHA"
-    auth_password: "myAuthPass123"
-    priv_protocol: "AES"
-    priv_password: "myPrivPass456"
-EOF
-
-# SNMP Exporter Service
-incus file push - SNMPExporter/etc/systemd/system/snmp_exporter.service <<EOF
-[Unit]
-Description=Prometheus SNMP Exporter
-After=network-online.target
-
-[Service]
-User=root
-Restart=on-failure
-ExecStart=/usr/local/bin/snmp_exporter \\
-  --config.file=/etc/snmp_exporter/snmp.yml \\
-  --config.auth-file=/etc/snmp_exporter/auth.yml \\
-  --web.listen-address=0.0.0.0:9116
-[Install]
-WantedBy=multi-user.target
-EOF
-
-incus exec SNMPExporter -- systemctl daemon-reload
-incus exec SNMPExporter -- systemctl enable --now snmp_exporter
-
-# --- 5. Finalize Host Prometheus Config ---
-echo "Linking Prometheus to containers..."
-tee /etc/prometheus/prometheus.yml > /dev/null <<EOF
-global:
-  scrape_interval: 15s
-
-alerting:
-  alertmanagers:
-  - static_configs:
-    - targets: ["alertmanager.incus:9093"]
-
-scrape_configs:
-  - job_name: "prometheus"
-    static_configs:
-      - targets: ["localhost:9090"]
-
-  - job_name: "alertmanager"
-    static_configs:
-      - targets: ["alertmanager.incus:9093"]
-
-  - job_name: "snmp-exporter"
-    metrics_path: /snmp
-    params:
-      module: [snmpv3_switch]
-      target: ["switch.incus"]
-    static_configs:
-      - targets: ["SNMPExporter.incus:9116"]
-EOF
-
-echo "Restarting Host Prometheus..."
 systemctl daemon-reload
-systemctl restart prometheus
+systemctl enable alertmanager
+systemctl start alertmanager
+systemctl status alertmanager
+EOF
 
-echo "--- Deployment Complete! ---"
-echo "Prometheus: http://$(hostname -I | awk '{print $1}'):9090"
+echo "========================================================"
+echo "   PART 3 COMPLETE - DEPLOYMENT DONE"
+echo "========================================================"
+echo "  Prometheus:    http://${CNT2_IP}:9090"
+echo "  SNMP Exporter: http://${SNMP_EXPORTER_IP}:9116"
+echo "  Alertmanager:  http://${ALERTMANAGER_IP}:9093"
+echo "========================================================"

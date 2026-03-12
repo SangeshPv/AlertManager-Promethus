@@ -3,24 +3,25 @@ set -e
 
 # --- CHECKS ---
 if [ "$EUID" -ne 0 ]; then
-  echo "Please run as root (sudo ./auto_deploy.sh)"
+  echo "Please run as root (sudo ./incus.sh)"
   exit
 fi
 
 echo "========================================================"
-echo "   AUTOMATED LAB DEPLOYMENT "
+echo "   PART 1 - INSTALLING INCUS"
 echo "========================================================"
 
 # ========================================================
-# [PART 1] DEPENDENCIES & INCUS INSTALLATION
+# DEPENDENCIES
 # ========================================================
-echo "--- [Part 1] Installing Dependencies and Incus ---"
-
-# 1. Install Dependencies
+echo "--- Installing Dependencies ---"
 apt-get update
-apt-get install -y spice-vdagent spice-webdavd wget btrfs-progs curl tar
+apt-get install -y spice-vdagent spice-webdavd wget btrfs-progs curl tar jq
 
-# 2. Add Zabbly Repository
+# ========================================================
+# ZABBLY REPOSITORY
+# ========================================================
+echo "--- Adding Zabbly Repository ---"
 mkdir -p /etc/apt/keyrings
 wget -qO - https://pkgs.zabbly.com/key.asc | gpg --dearmor -o /etc/apt/keyrings/zabbly.gpg --yes
 
@@ -34,12 +35,17 @@ Architectures: $(dpkg --print-architecture)
 Signed-By: /etc/apt/keyrings/zabbly.gpg
 EOF
 
-# 3. Install Incus
+# ========================================================
+# INSTALL INCUS
+# ========================================================
+echo "--- Installing Incus ---"
 apt-get update
 apt-get install -y incus
 
-# 4. AUTOMATED INITIALIZATION
-echo "--- Automating Incus Initialization ---"
+# ========================================================
+# INITIALISE INCUS
+# ========================================================
+echo "--- Initialising Incus ---"
 if ! command -v incus &> /dev/null; then
     echo "Incus install failed!"
     exit 1
@@ -75,3 +81,10 @@ profiles:
   name: default
 cluster: null
 EOF
+
+echo "========================================================"
+echo "   PART 1 COMPLETE"
+echo "========================================================"
+echo "  Incus is installed and initialised."
+echo "  Run deploy_containers.sh to continue."
+echo "========================================================"
