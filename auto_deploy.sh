@@ -94,8 +94,8 @@ echo "--- Fetching container IP addresses ---"
 SWITCH_IP=$(incus list switch --format=json | jq -r '.[0].state.network.eth0.addresses[] | select(.family=="inet").address')
 SNMP_EXPORTER_IP=$(incus list SNMPExporter --format=json | jq -r '.[0].state.network.eth0.addresses[] | select(.family=="inet").address')
 ALERTMANAGER_IP=$(incus list alertmanager --format=json | jq -r '.[0].state.network.eth0.addresses[] | select(.family=="inet").address')
-
-if [ -z "$SWITCH_IP" ] || [ -z "$SNMP_EXPORTER_IP" ] || [ -z "$ALERTMANAGER_IP" ]; then
+CNT2_IP=$(incus list cnt2 --format=json | jq -r '.[0].state.network.eth0.addresses[] | select(.family=="inet").address')
+if [ -z "$SWITCH_IP" ] || [ -z "$SNMP_EXPORTER_IP" ] || [ -z "$ALERTMANAGER_IP" ] || [ -z "$CNT2_IP" ]; then
     echo "Error: Failed to get IP for one or more containers. Aborting."
     exit 1
 fi
@@ -111,6 +111,7 @@ incus exec cnt2 -- bash -s "$SWITCH_IP" "$SNMP_EXPORTER_IP" "$ALERTMANAGER_IP" <
 TARGET_SWITCH_IP=$1
 SNMP_EXPORTER_IP=$2
 ALERTMANAGER_IP=$3
+CNT2_IP=$4
 
 ## Prometheus Installation on cnt2
 echo "Installing Prometheus on cnt2..."
@@ -121,12 +122,11 @@ tar xvf prometheus-2.54.1.linux-amd64.tar.gz
 sleep 10
 mv prometheus-2.54.1.linux-amd64/prometheus /usr/local/bin/
 mv prometheus-2.54.1.linux-amd64/promtool /usr/local/bin/
-rm -rf prometheus-2.54.1.linux-amd64.tar.gz prometheus-2.54.1.linux-amd64
 mkdir -p /etc/prometheus /var/lib/prometheus
 # Move Configuration Files that might exist in the directory
 mv prometheus-2.54.1.linux-amd64/consoles /etc/prometheus/ || true
 mv prometheus-2.54.1.linux-amd64/console_libraries /etc/prometheus/ || true
-
+rm -rf prometheus-2.54.1.linux-amd64.tar.gz prometheus-2.54.1.linux-amd64
 # prometheus.yml Configuration
 cat <<EOTEE > /etc/prometheus/prometheus.yml
 global:
@@ -259,6 +259,30 @@ curl -L -o mibs/SNMPv2-MIB.txt https://raw.githubusercontent.com/net-snmp/net-sn
 curl -L -o mibs/IF-MIB.txt https://raw.githubusercontent.com/net-snmp/net-snmp/master/mibs/IF-MIB.txt
 curl -L -o mibs/IANAifType-MIB.txt https://raw.githubusercontent.com/net-snmp/net-snmp/master/mibs/IANAifType-MIB.txt
 go run . generate --no-fail-on-parse-errors
+cp ~/snmp_exporter/generator/snmp.yml /etc/snmp_exporter/snmp.yml
+
+cat <<EOTEE > /etc/systemd/system/snmp_exporter.service
+[Unit]
+Description=SNMP Exporter
+After=network.target
+
+[Service]
+User=root
+Group=root
+Type=simple
+ExecStart=/usr/local/bin/snmp_exporter \
+  --config.file=/etc/snmp_exporter/snmp.yml
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOTEE
+
+systemctl daemon-reload
+systemctl enable snmp_exporter
+systemctl start snmp_exporter
+systemctl status snmp_exporter
 EOF
 
 ## SNMPv3 Configuration
@@ -276,11 +300,10 @@ sysLocation "Incus Test Lab"
 sysContact Test@example.com
 # SNMPv3 user access
 rouser Hero
-sysLocation "Incus Test Lab"
 EOTEE
-systemctl status snmpd
 systemctl start snmpd
 systemctl enable snmpd 
+systemctl status snmpd
 ufw allow 161/udp
 EOF
 
@@ -353,5 +376,10 @@ systemctl start alertmanager
 systemctl status alertmanager
 EOF
 
-# Commented out the hardcoded access instruction, as the IP will be dynamic.
-# Access the Web UI with http://10.12.242.213:9093
+echo "========================================================"
+echo "   DEPLOYMENT COMPLETE"
+echo "========================================================"
+echo "  Prometheus:    http://${CNT2_IP}:9090  (on cnt2)"
+echo "  SNMP Exporter: http://${SNMP_EXPORTER_IP}:9116"
+echo "  Alertmanager:  http://${ALERTMANAGER_IP}:9093"
+echo "========================================================"
