@@ -1,5 +1,6 @@
 #!/bin/bash
 set -e
+trap 'echo "Execution failed at line $LINENO. Exiting."; exit 1' ERR
 
 # --- CHECKS ---
 if [ "$EUID" -ne 0 ]; then

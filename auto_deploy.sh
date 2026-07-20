@@ -1,5 +1,6 @@
 #!/bin/bash
 set -euo pipefail
+trap 'echo "Execution failed at line $LINENO. Exiting."; exit 1' ERR
 cd "$(dirname "$0")"
 
 # --- CHECKS ---
