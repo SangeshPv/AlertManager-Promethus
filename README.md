@@ -212,6 +212,45 @@ To confirm everything is wired up correctly, open Prometheus and go to **Status 
 
 ---
 
+## Manually Sending a Test Alert
+
+The deployment script automatically sends a test notification when it completes to confirm the email pipeline is working. However, you may want to send a test alert manually, for example, after changing your SMTP credentials in `alertmanager.yml`.
+
+You can do this at any time from your host machine's terminal.
+
+**1. Get the Alertmanager IP Address**
+
+First, get the current IP of the `alertmanager` container:
+
+```bash
+ALERTMANAGER_IP=$(sudo incus list alertmanager --format=json | jq -r '..state.network.eth0.addresses[] | select(.family=="inet").address')
+```
+
+**2. Send the Test Alert**
+
+Next, use `curl` to post a test alert directly to the Alertmanager API:
+
+```bash
+curl -X POST http://${ALERTMANAGER_IP}:9093/api/v2/alerts \
+-H "Content-Type: application/json" \
+-d '[
+  {
+    "labels": {
+      "alertname": "ManualEmailTest",
+      "severity": "critical"
+    },
+    "annotations": {
+      "summary": "Manual Test for Email Configuration",
+      "description": "This is a manually triggered alert to verify that your email settings are working correctly."
+    }
+  }
+]'
+```
+
+If your configuration is correct, you should receive an email within a minute. If it doesn't arrive, check the Alertmanager logs for errors (see the Troubleshooting section below).
+
+---
+
 ## Troubleshooting
 
 **Prometheus won't start**
