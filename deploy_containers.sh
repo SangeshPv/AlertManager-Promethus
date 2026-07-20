@@ -22,18 +22,18 @@ fi
 # ========================================================
 # CREATE AND START CONTAINERS
 # ========================================================
-echo "--- Creating containers ---"
+echo "Deploying the containers"
 incus create images:ubuntu/noble/cloud switch
 incus create images:ubuntu/noble/cloud cnt2
 incus create images:ubuntu/noble/cloud SNMPExporter
 incus create images:ubuntu/noble/cloud alertmanager
-
-echo "--- Starting containers ---"
+echo "Starting containers..."
 incus start switch SNMPExporter alertmanager cnt2
 
 echo "Waiting 20s for containers to boot and acquire IP addresses..."
 sleep 20
 incus list
+
 
 # ========================================================
 # VERIFY IPs

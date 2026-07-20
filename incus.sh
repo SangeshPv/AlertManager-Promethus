@@ -8,20 +8,20 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 echo "========================================================"
-echo "   PART 1 - INSTALLING INCUS"
+echo "   AUTOMATED LAB DEPLOYMENT "
 echo "========================================================"
 
 # ========================================================
-# DEPENDENCIES
+# [PART 1] DEPENDENCIES & INCUS INSTALLATION
 # ========================================================
-echo "--- Installing Dependencies ---"
+echo "--- [Part 1] Installing Dependencies and Incus ---"
+
+# 1. Install Dependencies
 apt-get update
+# Added jq for processing JSON from incus
 apt-get install -y spice-vdagent spice-webdavd wget btrfs-progs curl tar jq
 
-# ========================================================
-# ZABBLY REPOSITORY
-# ========================================================
-echo "--- Adding Zabbly Repository ---"
+# 2. Add Zabbly Repository
 mkdir -p /etc/apt/keyrings
 wget -qO - https://pkgs.zabbly.com/key.asc | gpg --dearmor -o /etc/apt/keyrings/zabbly.gpg --yes
 
@@ -35,17 +35,12 @@ Architectures: $(dpkg --print-architecture)
 Signed-By: /etc/apt/keyrings/zabbly.gpg
 EOF
 
-# ========================================================
-# INSTALL INCUS
-# ========================================================
-echo "--- Installing Incus ---"
+# 3. Install Incus
 apt-get update
 apt-get install -y incus
 
-# ========================================================
-# INITIALISE INCUS
-# ========================================================
-echo "--- Initialising Incus ---"
+# 4. AUTOMATED INITIALIZATION
+echo "--- Automating Incus Initialization ---"
 if ! command -v incus &> /dev/null; then
     echo "Incus install failed!"
     exit 1
@@ -81,10 +76,3 @@ profiles:
   name: default
 cluster: null
 EOF
-
-echo "========================================================"
-echo "   PART 1 COMPLETE"
-echo "========================================================"
-echo "  Incus is installed and initialised."
-echo "  Run deploy_containers.sh to continue."
-echo "========================================================"
