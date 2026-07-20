@@ -309,6 +309,29 @@ systemctl status alertmanager
 EOF
 
 echo "========================================================"
+echo "   SENDING TEST NOTIFICATION"
+echo "========================================================"
+echo "--- Sending test alert to Alertmanager to verify email configuration ---"
+curl -s -X POST http://${ALERTMANAGER_IP}:9093/api/v2/alerts \
+-H "Content-Type: application/json" \
+-d '[
+  {
+    "labels": {
+      "alertname": "LabDeploymentComplete",
+      "severity": "notification"
+    },
+    "annotations": {
+      "summary": "Monitoring Lab Deployed Successfully",
+      "description": "This is a test alert to confirm that your Alertmanager instance is configured correctly and can send email notifications."
+    }
+  }
+]'
+
+echo "Test alert sent. Check your inbox for a notification from Alertmanager."
+echo "Note: It may take a minute to arrive due to the 'group_wait' setting in alertmanager.yml."
+
+
+echo "========================================================"
 echo "   DEPLOYMENT COMPLETE"
 echo "========================================================"
 echo "  Prometheus:    http://${CNT2_IP}:9090  (on cnt2)"
