@@ -259,7 +259,7 @@ incus exec alertmanager \
     --env AM_SMTP_PASS="$AM_SMTP_PASS" \
     -- bash <<'EOF'
 apt-get update
-apt-get install -y wget tar nano openssh-server
+apt-get install -y wget tar nano openssh-server curl
 systemctl enable --now ssh
 
 wget https://github.com/prometheus/alertmanager/releases/download/v0.28.1/alertmanager-0.28.1.linux-amd64.tar.gz
