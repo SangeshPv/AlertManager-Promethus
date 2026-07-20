@@ -240,16 +240,32 @@ systemctl status snmpd
 ufw allow 161/udp
 EOF
 
+## Prompt for Alertmanager Credentials
+echo "========================================================"
+echo "   ALERTMANAGER EMAIL CONFIGURATION"
+echo "========================================================"
+echo "Please enter your Gmail SMTP credentials to enable email alerts."
+echo "NOTE: You must use a Google App Password, not your regular account password."
+read -p "Recipient email address (To): " AM_EMAIL_TO
+read -p "Sender email address (From/Username): " AM_EMAIL_FROM
+read -sp "Gmail App Password: " AM_SMTP_PASS
+echo
+
 ## ALertmanager Configuration
 echo "Configuring Alertmanager..."
-incus exec alertmanager -- bash <<'EOF'
+incus exec alertmanager \
+    --env AM_EMAIL_TO="$AM_EMAIL_TO" \
+    --env AM_EMAIL_FROM="$AM_EMAIL_FROM" \
+    --env AM_SMTP_PASS="$AM_SMTP_PASS" \
+    -- bash <<'EOF'
 apt-get update
 apt-get install -y wget tar nano openssh-server
 systemctl enable --now ssh
 
 wget https://github.com/prometheus/alertmanager/releases/download/v0.28.1/alertmanager-0.28.1.linux-amd64.tar.gz
 tar xvf alertmanager-0.28.1.linux-amd64.tar.gz
-cd alertmanager-0.28.1.linux-amd64
+mv alertmanager-0.28.1.linux-amd64/alertmanager /usr/local/bin/
+chmod +x /usr/local/bin/alertmanager
 mkdir -p /etc/alertmanager
 cat <<EOTEE > /etc/alertmanager/alertmanager.yml
 route:
@@ -257,17 +273,17 @@ route:
   group_wait: 30s
   group_interval: 5m
   repeat_interval: 5s
-  receiver: 'email-notifications'  # <- now sends to email by default
+  receiver: 'email-notifications'
 
 receivers:
   - name: 'email-notifications'
     email_configs:
-      - to: 'enter email@gmail.com'
-        from: 'enter email.mpct@gmail.com'
+      - to: '${AM_EMAIL_TO}'
+        from: '${AM_EMAIL_FROM}'
         smarthost: 'smtp.gmail.com:587'  # or your SMTP server
-        auth_username: 'enter email.mpct@gmail.com'
-        auth_password: 'generate 1 of your own '
-        auth_identity: 'enter email.mpct@gmail.com'
+        auth_username: '${AM_EMAIL_FROM}'
+        auth_password: '${AM_SMTP_PASS}'
+        auth_identity: '${AM_EMAIL_FROM}'
         require_tls: true
 
   - name: 'web.hook'
@@ -293,7 +309,7 @@ After=network-online.target
 User=root
 Group=root
 Type=simple
-ExecStart=/root/alertmanager-0.28.1.linux-amd64/alertmanager \
+ExecStart=/usr/local/bin/alertmanager \
   --config.file=/etc/alertmanager/alertmanager.yml \
   --cluster.listen-address=""
 Restart=on-failure
