@@ -20,6 +20,7 @@ echo "========================================================"
 # 1. Stop and delete containers
 CONTAINERS="switch cnt2 SNMPExporter alertmanager"
 echo "--- Deleting containers ---"
+incus stop switch cnt2 SNMPExporter alertmanager
 for container in $CONTAINERS; do
     if incus info "$container" &>/dev/null; then
         echo "Deleting container: $container..."
