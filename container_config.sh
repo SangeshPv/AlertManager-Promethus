@@ -4,8 +4,8 @@ trap 'echo "Execution failed at line $LINENO. Exiting."; exit 1' ERR
 
 # --- CHECKS ---
 if [ "$EUID" -ne 0 ]; then
-  echo "Please run as root (sudo ./containers_config.sh)"
-  exit
+  echo "Please run as root (sudo ./container_config.sh)"
+  exit 1
 fi
 
 echo "========================================================"
