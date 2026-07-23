@@ -57,9 +57,9 @@ A few things need to be in place first.
 
 **Internet access is required throughout.** Container images, binaries, and Go modules are all downloaded at runtime. If your connection drops mid-way, the script will fail.
 
-**The script must be run as root.** Incus requires root to install and initialise. Run it with `sudo ./auto_deploy.sh`.
+**The script must be run as root.** Incus requires root to install and initialize. Run it with `sudo ./auto_deploy.sh`.
 
-**Fill in your email details before running.** Near the bottom of the script, there's a section for Alertmanager's email configuration. You'll need to replace the placeholder values with your real Gmail address and an App Password. A regular Gmail password won't work here — Google requires you to generate a dedicated App Password, which you can do at [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords). Two-factor authentication must be enabled on the account first.
+**You will be prompted for your email details.** During setup, the script will ask for your Gmail address and an App Password to configure email alerts. A regular Gmail password won't work here — Google requires you to generate a dedicated App Password, which you can do at myaccount.google.com/apppasswords. Two-factor authentication must be enabled on the account first.
 
 ---
 
@@ -107,13 +107,12 @@ All four containers should show a **RUNNING** status with an IPv4 address assign
 > ```
 
 ---
-
-### Part 3 — Configure the Services (`containers_config.sh`)
+### Part 3 — Configure the Services (`container_config.sh`)
 
 This is the longest part. It installs and configures Prometheus, the SNMP Exporter, SNMPv3 on the switch, and Alertmanager inside their respective containers. The container IPs are detected automatically at the start of the script, so no manual input is needed.
 
 ```bash
-sudo ./containers_config.sh
+sudo ./container_config.sh
 ```
 
 This step takes the most time — mainly because the SNMP Exporter generator compiles from Go source, which can take 3–5 minutes on its own. The script will appear to hang during this step; that's normal.
