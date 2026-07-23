@@ -30,7 +30,7 @@ incus create images:ubuntu/noble/cloud SNMPExporter
 incus create images:ubuntu/noble/cloud alertmanager
 echo "Starting containers..."
 incus start switch SNMPExporter alertmanager cnt2
-
+#This is to give the containers time to boot and acquire IP addresses this ensures that the IP addresses are available when we try to fetch them later in the script.
 echo "Waiting 20s for containers to boot and acquire IP addresses..."
 sleep 20
 incus list
