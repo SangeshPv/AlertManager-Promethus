@@ -329,6 +329,7 @@ echo "========================================================"
 echo "   SENDING TEST NOTIFICATION"
 echo "========================================================"
 echo "--- Sending test alert to Alertmanager to verify email configuration ---"
+sleep 5
 curl -s -X POST http://${ALERTMANAGER_IP}:9093/api/v2/alerts \
 -H "Content-Type: application/json" \
 -d '[
