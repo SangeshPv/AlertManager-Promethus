@@ -227,7 +227,6 @@ systemctl stop snmpd
 # Create SNMPv3 User
 net-snmp-create-v3-user -ro -a SHA -A "Hero12345" -x AES -X "Hero12345" Hero
 cat <<EOTEE > /etc/snmp/snmpd.conf
-rocommunity public
 agentAddress udp:161
 sysLocation "Incus Test Lab"
 sysContact Test@example.com
