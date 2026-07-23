@@ -1,5 +1,7 @@
 # Auto Deploy Lab – Documentation
 
+**Version 0.2**
+
 ## What is this?
 
 This script sets up a fully working network monitoring lab on your machine — automatically. You run one command, and it handles everything: installing the container runtime, spinning up four containers, configuring each service, and wiring them all together. By the time it finishes, you have a live Prometheus stack monitoring a simulated network switch.
@@ -137,6 +139,20 @@ All four should show **active (running)**. Then open Prometheus in your browser 
 | 3 | `containers_config.sh` | Yes — safe to re-run to reapply config |
 
 If you just want the full automated deployment in one go, you can still use the combined `auto_deploy.sh` script instead.
+
+---
+
+## Cleaning Up the Lab
+
+A cleanup script is provided to tear down the lab environment. It stops and deletes all four containers created by the deployment script.
+
+```bash
+sudo ./cleanup.sh
+```
+
+> **Important Note:** The current version of `cleanup.sh` is aggressive. It will delete the containers, the `incusbr0` network, and the `default` storage pool. This is fine for a dedicated lab machine, but it may remove other, unrelated containers if you are using Incus for other projects.
+>
+> If you want a safer cleanup that only removes the lab containers, you can edit `cleanup.sh` and comment out or remove the sections for deleting the network and storage pool.
 
 ---
 
