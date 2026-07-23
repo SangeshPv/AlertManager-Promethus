@@ -4,8 +4,8 @@ trap 'echo "Execution failed at line $LINENO. Exiting."; exit 1' ERR
 
 # --- CHECKS ---
 if [ "$EUID" -ne 0 ]; then
-  echo "Please run as root (sudo ./containers_config.sh)"
-  exit
+  echo "Please run as root (sudo ./container_config.sh)"
+  exit 1
 fi
 
 echo "========================================================"
@@ -227,7 +227,6 @@ systemctl stop snmpd
 # Create SNMPv3 User
 net-snmp-create-v3-user -ro -a SHA -A "Hero12345" -x AES -X "Hero12345" Hero
 cat <<EOTEE > /etc/snmp/snmpd.conf
-rocommunity public
 agentAddress udp:161
 sysLocation "Incus Test Lab"
 sysContact Test@example.com
