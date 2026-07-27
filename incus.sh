@@ -12,6 +12,26 @@ echo "========================================================"
 echo "   AUTOMATED LAB DEPLOYMENT "
 echo "========================================================"
 
+# 0. OS Check
+echo "--- Checking OS compatibility ---"
+if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    if [ "$ID" = "ubuntu" ]; then
+        if [ "$VERSION_ID" = "22.04" ] || [ "$VERSION_ID" = "24.04" ] || [ "$VERSION_ID" = "26.04" ]; then
+            echo "  - Ubuntu $VERSION_ID detected. Proceeding with installation."
+        else
+            echo "Error: Only Ubuntu 22.04, 24.04, or 26.04 is supported. Detected Ubuntu $VERSION_ID."
+            exit 1
+        fi
+    else
+        echo "Error: Only Ubuntu is supported. Detected $ID."
+        exit 1
+    fi
+else
+    echo "Error: Cannot determine OS. /etc/os-release not found."
+    exit 1
+fi
+
 # ========================================================
 # [PART 1] DEPENDENCIES & INCUS INSTALLATION
 # ========================================================
