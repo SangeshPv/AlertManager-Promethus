@@ -51,7 +51,7 @@ All four containers live on an internal network bridge (`incusbr0`) and can talk
 
 A few things need to be in place first.
 
-**Your machine needs to be running Ubuntu 22.04 or 24.04.** Other distributions aren't supported because the script pulls packages from Ubuntu-specific repositories.
+**Your machine needs to be running Ubuntu 22.04, 24.04, or 26.04.** Other distributions aren't supported because the script pulls packages from Ubuntu-specific repositories.
 
 **You need at least 4 GB of RAM and around 25 GB of free disk space.** The script creates a 20 GB storage pool for the containers, and the services themselves aren't light — especially the SNMPExporter container, which compiles Go code during setup.
 
